@@ -1,5 +1,7 @@
 package com.egg.collector.my_egg_basket.domain;
 
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Slice;
 import org.springframework.data.mongodb.repository.MongoRepository;
 import org.springframework.stereotype.Repository;
 
@@ -14,4 +16,5 @@ public interface RealtimeDataRepository extends MongoRepository<RealtimeData, St
 
     // 3일치 데이터만 저장한다는 요구사항에 맞게, 오래된 데이터를 삭제할 수 있는 메서드
     List<RealtimeData> deleteByTimestampBefore(LocalDateTime cutoffDate);
+    Slice<RealtimeData> findAllByTimestampBefore(LocalDateTime date, Pageable pageable);
 }
