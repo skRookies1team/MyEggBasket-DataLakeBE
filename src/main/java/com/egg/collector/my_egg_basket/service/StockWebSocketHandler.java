@@ -84,13 +84,13 @@ public class StockWebSocketHandler extends TextWebSocketHandler {
 
         try {
             data.setStckCntgHour(dataFields[KisWebSocketConnector.FIELD_MAP.get("stck_cntg_hour")]); // 🚨 setter 이름 변경
-            String signField = safeGet(dataFields, 2);
-            boolean isNegative = "5".equals(signField) || "4".equals(signField);
+            // 잘못된 등락부호 판별 제거, 전일 대비율로 음수 여부 판별
+            Double changeRate = toDouble(dataFields, KisWebSocketConnector.FIELD_MAP.get("prdy_ctrt"));
 
             // 🚨 나머지 setter 이름도 모두 변경
             data.setStckPrpr(toNumber(dataFields, KisWebSocketConnector.FIELD_MAP.get("stck_prpr")));
             data.setPrdyVrss(toNumber(dataFields, KisWebSocketConnector.FIELD_MAP.get("prdy_vrss")));
-            data.setPrdyCtrt(toDouble(dataFields, KisWebSocketConnector.FIELD_MAP.get("prdy_ctrt")));
+            data.setPrdyCtrt(changeRate);
             data.setAcmlVol(toNumber(dataFields, KisWebSocketConnector.FIELD_MAP.get("acml_vol")));
             data.setAskp1(toNumber(dataFields, KisWebSocketConnector.FIELD_MAP.get("askp1")));
             data.setBidp1(toNumber(dataFields, KisWebSocketConnector.FIELD_MAP.get("bidp1")));
@@ -100,7 +100,7 @@ public class StockWebSocketHandler extends TextWebSocketHandler {
             data.setShnuCntgCsnu(toNumber(dataFields, KisWebSocketConnector.FIELD_MAP.get("shnu_cntg_csnu")));
             data.setTotalAskpRsqn(toNumber(dataFields, KisWebSocketConnector.FIELD_MAP.get("total_askp_rsqn")));
             data.setTotalBidpRsqn(toNumber(dataFields, KisWebSocketConnector.FIELD_MAP.get("total_bidp_rsqn")));
-            data.setNegative(isNegative);
+            data.setNegative(changeRate < 0);
         } catch (Exception e) {
             log.error("Failed to parse data for {}. Message: {}. Error: {}", trKey, dataString, e.getMessage());
             return null;
