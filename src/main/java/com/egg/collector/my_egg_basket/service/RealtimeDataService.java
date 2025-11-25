@@ -23,7 +23,7 @@ public class RealtimeDataService {
             return realtimeDataRepository.save(data);
         } catch (Exception e) {
             // 중복 키 에러 등 DB 저장 실패 시 로그만 남기고 무시
-            log.error("Failed to save RealtimeData for {}: {}", data.getStck_shrn_iscd(), e.getMessage());
+            log.error("Failed to save RealtimeData for {}: {}", data.getStckShrnIscd(), e.getMessage());
             return null;
         }
     }
