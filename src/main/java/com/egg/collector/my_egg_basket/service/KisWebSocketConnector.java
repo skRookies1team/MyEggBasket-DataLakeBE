@@ -1,6 +1,5 @@
 package com.egg.collector.my_egg_basket.service;
 
-import com.egg.collector.my_egg_basket.domain.RealtimeData;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
@@ -11,11 +10,12 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 import org.springframework.web.socket.client.WebSocketClient;
 import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 
 import java.net.URI;
-import java.util.Arrays;
+import java.net.URISyntaxException; // 🚨 URISyntaxException 임포트 추가
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.Executors;
@@ -26,7 +26,7 @@ import java.util.concurrent.atomic.AtomicReference;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-public class WebSocketClient {
+public class KisWebSocketConnector {
 
     private final RealtimeDataService dataService;
     private final ObjectMapper objectMapper;
@@ -45,10 +45,10 @@ public class WebSocketClient {
     private String[] stockCodes;
 
     private final AtomicReference<String> approvalKey = new AtomicReference<>(null);
-    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(); // 🚨 오타 수정: newSingleThreadScheduledService() -> newSingleThreadScheduledExecutor()
 
     // H0STCNT0 필드 인덱스 매핑 (useRealtimeStock.ts 참고)
-    private static final Map<String, Integer> FIELD_MAP = new HashMap<>();
+    public static final Map<String, Integer> FIELD_MAP = new HashMap<>();
     static {
         FIELD_MAP.put("stck_shrn_iscd", 0);
         FIELD_MAP.put("stck_cntg_hour", 1);
@@ -68,11 +68,8 @@ public class WebSocketClient {
 
     @PostConstruct
     public void startClient() {
-        // 앱 시작 시 Approval Key 발급을 예약하고, 24시간마다 재발급하도록 스케줄링합니다.
-        // Approval Key는 보통 24시간 유효합니다.
         scheduler.scheduleAtFixedRate(this::getAndConnect, 0, 24, TimeUnit.HOURS);
-
-        // 3일치 데이터만 보존하는 정리 로직을 1시간마다 실행
+        dataService.cleanupOldData();
         scheduler.scheduleAtFixedRate(dataService::cleanupOldData, 1, 1, TimeUnit.HOURS);
     }
 
@@ -84,7 +81,6 @@ public class WebSocketClient {
                 connectAndSubscribe();
             } else {
                 log.error("Failed to get Approval Key. Retrying in 1 hour.");
-                // 재발급 실패 시 임시로 1시간 뒤 다시 시도하도록 재스케줄링 (24시간 주기와 별도)
                 scheduler.schedule(this::getAndConnect, 1, TimeUnit.HOURS);
             }
         } catch (Exception e) {
@@ -97,7 +93,7 @@ public class WebSocketClient {
      * @return 발급된 Approval Key
      */
     private String getApprovalKey() {
-        log.info("Requesting Approval Key from KIS API...");
+        log.info("Requesting Approval Key from KIS API at {}/oauth2/Approval...", apiUrl);
         try {
             WebClient webClient = WebClient.builder()
                     .baseUrl(apiUrl)
@@ -115,21 +111,24 @@ public class WebSocketClient {
                     .bodyValue(requestBody)
                     .retrieve()
                     .bodyToMono(JsonNode.class)
-                    .block(); // 블록킹을 사용하여 동기적으로 처리
+                    .block();
 
             String key = response != null && response.has("approval_key")
                     ? response.get("approval_key").asText()
                     : null;
 
-            if (key != null) {
-                log.info("Approval Key received successfully.");
+            if (key != null && !key.isEmpty()) {
+                log.info("Approval Key received successfully: {}", key.substring(0, 10) + "...");
                 return key;
             } else {
-                log.error("Failed to parse approval_key from response: {}", response != null ? response.toString() : "null");
+                log.error("Failed to parse approval_key from response or key is empty. Response: {}", response != null ? response.toString() : "null");
                 return null;
             }
+        } catch (WebClientResponseException e) {
+            log.error("Failed to get Approval Key (HTTP Status: {}): Check your AppKey/AppSecret. Response Body: {}", e.getStatusCode(), e.getResponseBodyAsString());
+            return null;
         } catch (Exception e) {
-            log.error("Failed to get Approval Key: {}", e.getMessage());
+            log.error("Failed to get Approval Key: {}", e.getMessage(), e);
             return null;
         }
     }
@@ -139,26 +138,34 @@ public class WebSocketClient {
      */
     private void connectAndSubscribe() {
         WebSocketClient client = new StandardWebSocketClient();
+        URI uri = null;
+        try {uri = new URI(wsUrl); // 유효성 검증만 수행
+        } catch (URISyntaxException e) {
+            log.error("Invalid WebSocket URL syntax: {}. Error: {}", wsUrl, e.getMessage());
+            handleClose(null);
+            return;
+        }
 
         try {
             client.execute(
                     new StockWebSocketHandler(approvalKey.get(), stockCodes, trId, dataService, objectMapper, this::handleClose),
-                    new URI(wsUrl)
-            ).get(); // 연결이 완료될 때까지 블록킹
+                    wsUrl // execute는 String 시그니처 사용
+            ).get();
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             log.error("WebSocket connection interrupted.");
         } catch (Exception e) {
             log.error("WebSocket connection failed: {}", e.getMessage());
-            handleClose(); // 연결 실패 시 재접속 시도
+            handleClose(null);
         }
     }
 
     /**
-     * 웹소켓 연결 종료 시 재접속을 시도합니다.
+     * 웹소켓 연결 종료 시 재접속을 시도합니다. (Consumer<Void> 시그니처 맞춤)
+     * @param ignored StockWebSocketHandler에서 전달되는 Void 인자 (사용하지 않음)
      */
-    private void handleClose() {
+    private void handleClose(Void ignored) {
         log.warn("WebSocket connection closed. Retrying connection in 5 seconds...");
         scheduler.schedule(this::connectAndSubscribe, 5, TimeUnit.SECONDS);
     }
