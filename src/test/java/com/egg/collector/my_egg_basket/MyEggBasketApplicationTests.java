@@ -32,7 +32,7 @@ class MyEggBasketApplicationTests {
 		RealtimeData oldData = new RealtimeData();
 		oldData.setStckShrnIscd("TEST_CODE"); // 테스트용 종목 코드
 		oldData.setStckPrpr(50000L);
-		oldData.setTimestamp(oldTime);
+		oldData.setTimestamp(String.valueOf(oldTime));
 		oldData.setAcmlVol(100L);
 		oldData.setPrdyCtrt(1.5);
 
