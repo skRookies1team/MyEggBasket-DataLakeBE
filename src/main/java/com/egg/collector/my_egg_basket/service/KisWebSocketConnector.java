@@ -1,5 +1,6 @@
 package com.egg.collector.my_egg_basket.service;
 
+import com.egg.collector.my_egg_basket.domain.RealtimeDataRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
@@ -17,6 +18,7 @@ import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 import java.net.URI;
 import java.net.URISyntaxException; // 🚨 URISyntaxException 임포트 추가
 import java.util.HashMap;
+import java.util.Map;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -46,7 +48,6 @@ public class KisWebSocketConnector {
 
     private final AtomicReference<String> approvalKey = new AtomicReference<>(null);
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(); // 🚨 오타 수정: newSingleThreadScheduledService() -> newSingleThreadScheduledExecutor()
-
     // H0STCNT0 필드 인덱스 매핑 (useRealtimeStock.ts 참고)
     public static final Map<String, Integer> FIELD_MAP = new HashMap<>();
     static {
@@ -65,6 +66,7 @@ public class KisWebSocketConnector {
         FIELD_MAP.put("total_askp_rsqn", 38);
         FIELD_MAP.put("total_bidp_rsqn", 39);
     }
+    public static final int IDX_TOTAL_BIDP_RSQN = 39;
 
     @PostConstruct
     public void startClient() {

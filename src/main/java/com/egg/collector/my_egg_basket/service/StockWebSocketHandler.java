@@ -2,7 +2,6 @@ package com.egg.collector.my_egg_basket.service;
 
 import com.egg.collector.my_egg_basket.domain.RealtimeData;
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.socket.CloseStatus;
@@ -10,6 +9,11 @@ import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.Map;
 import java.util.function.Consumer;
 
@@ -35,118 +39,88 @@ public class StockWebSocketHandler extends TextWebSocketHandler {
     @Override
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
         log.info("WebSocket connection established. Subscribing to {} stocks...", stockCodes.length);
-
         for (String code : stockCodes) {
-            String subscribeMessage = createSubscribeMessage(code);
-            session.sendMessage(new TextMessage(subscribeMessage));
-            log.debug("Subscribed to: {}", code);
+            session.sendMessage(new TextMessage(createSubscribeMessage(code)));
         }
     }
 
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
         String payload = message.getPayload();
+        String[] parts = payload.split("\\|");
 
-        if (payload.startsWith("0|") || payload.startsWith("1|")) {
-            RealtimeData data = parseRealtimeData(payload);
-            if (data != null) {
-                dataService.save(data);
-            }
-        }
-        else if (payload.startsWith("{")) {
+        if (parts.length > 3) {
+            String dataPart = parts[3];
+            String[] values = dataPart.split("\\^");
+
             try {
-                JsonNode jsonNode = objectMapper.readTree(payload);
-                log.info("System Message: {}", jsonNode.toPrettyString());
-            } catch (JsonProcessingException e) {
-                log.warn("Failed to parse system message as JSON: {}", payload);
+                String stockCode = values[0];
+                String timeStr = values[1];
+
+                // 1. 한국 시간 생성
+                LocalDate kstDate = LocalDate.now(ZoneId.of("Asia/Seoul"));
+                LocalTime kstTime = LocalTime.parse(timeStr, DateTimeFormatter.ofPattern("HHmmss"));
+                LocalDateTime finalTimestamp = LocalDateTime.of(kstDate, kstTime);
+
+                // 2. [수정됨] 포맷팅하여 문자열로 변환 (yyyy-MM-dd HH:mm:ss)
+                String timestampStr = finalTimestamp.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+
+                RealtimeData data = new RealtimeData();
+                data.setTimestamp(timestampStr); // 문자열 저장
+                data.setStckShrnIscd(stockCode);
+                data.setStckCntgHour(timeStr);
+
+                // 숫자 파싱 (소수점 처리 포함)
+                data.setStckPrpr(parseDoubleAsLong(values, 2));
+                data.setPrdyVrss(parseDoubleAsLong(values, 4));
+                data.setPrdyCtrt(parseDouble(values, 5));
+                data.setWghtAvrgPrc(parseDoubleAsLong(values, 6));
+
+                data.setAskp1(parseDoubleAsLong(values, 10));
+                data.setBidp1(parseDoubleAsLong(values, 11));
+
+                data.setAcmlVol(parseDoubleAsLong(values, 13));
+                data.setAcmlTrPbmn(parseDoubleAsLong(values, 14));
+
+                data.setSelnCntgCsnu(parseDoubleAsLong(values, 15));
+                data.setShnuCntgCsnu(parseDoubleAsLong(values, 16));
+
+                data.setTotalAskpRsqn(parseDoubleAsLong(values, 38));
+                data.setTotalBidpRsqn(parseDoubleAsLong(values, 39));
+
+                data.setNegative(data.getPrdyCtrt() < 0);
+
+                dataService.save(data);
+
+            } catch (Exception e) {
+                log.error("Parsing error: {}", e.getMessage());
             }
         }
     }
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
-        log.warn("WebSocket connection closed. Status: {}", status);
-        onCloseCallback.accept(null);
+        log.warn("WebSocket connection closed: {}", status);
+        if (onCloseCallback != null) onCloseCallback.accept(null);
     }
 
-    private RealtimeData parseRealtimeData(String message) {
-        String[] parts = message.split("\\|");
-        if (parts.length < 4) return null;
-
-        String trKey = parts[2];
-        String dataString = parts[3];
-
-        String[] dataFields = dataString.split("\\^");
-        if (dataFields.length == 0) return null;
-
-        RealtimeData data = new RealtimeData();
-        data.setStckShrnIscd(trKey); // 🚨 setter 이름 변경
-
-        try {
-            data.setStckCntgHour(dataFields[KisWebSocketConnector.FIELD_MAP.get("stck_cntg_hour")]); // 🚨 setter 이름 변경
-            String signField = safeGet(dataFields, 2);
-            boolean isNegative = "5".equals(signField) || "4".equals(signField);
-
-            // 🚨 나머지 setter 이름도 모두 변경
-            data.setStckPrpr(toNumber(dataFields, KisWebSocketConnector.FIELD_MAP.get("stck_prpr")));
-            data.setPrdyVrss(toNumber(dataFields, KisWebSocketConnector.FIELD_MAP.get("prdy_vrss")));
-            data.setPrdyCtrt(toDouble(dataFields, KisWebSocketConnector.FIELD_MAP.get("prdy_ctrt")));
-            data.setAcmlVol(toNumber(dataFields, KisWebSocketConnector.FIELD_MAP.get("acml_vol")));
-            data.setAskp1(toNumber(dataFields, KisWebSocketConnector.FIELD_MAP.get("askp1")));
-            data.setBidp1(toNumber(dataFields, KisWebSocketConnector.FIELD_MAP.get("bidp1")));
-            data.setWghtAvrgPrc(toNumber(dataFields, KisWebSocketConnector.FIELD_MAP.get("wght_avrg_prc")));
-            data.setAcmlTrPbmn(toNumber(dataFields, KisWebSocketConnector.FIELD_MAP.get("acml_tr_pbmn")));
-            data.setSelnCntgCsnu(toNumber(dataFields, KisWebSocketConnector.FIELD_MAP.get("seln_cntg_csnu")));
-            data.setShnuCntgCsnu(toNumber(dataFields, KisWebSocketConnector.FIELD_MAP.get("shnu_cntg_csnu")));
-            data.setTotalAskpRsqn(toNumber(dataFields, KisWebSocketConnector.FIELD_MAP.get("total_askp_rsqn")));
-            data.setTotalBidpRsqn(toNumber(dataFields, KisWebSocketConnector.FIELD_MAP.get("total_bidp_rsqn")));
-            data.setNegative(isNegative);
-        } catch (Exception e) {
-            log.error("Failed to parse data for {}. Message: {}. Error: {}", trKey, dataString, e.getMessage());
-            return null;
-        }
-
-        return data;
+    private Long parseDoubleAsLong(String[] values, int index) {
+        if (index >= values.length) return 0L;
+        String str = values[index].replace(",", "").trim();
+        if (str.isEmpty()) return 0L;
+        try { return (long) Double.parseDouble(str); } catch (Exception e) { return 0L; }
     }
 
-    private Long toNumber(String[] fields, int index) {
-        String val = safeGet(fields, index);
-        if (val.isEmpty()) return 0L;
-        try {
-            return Long.parseLong(val.replace(",", ""));
-        } catch (NumberFormatException e) {
-            return 0L;
-        }
-    }
-
-    private Double toDouble(String[] fields, int index) {
-        String val = safeGet(fields, index);
-        if (val.isEmpty()) return 0.0;
-        try {
-            return Double.parseDouble(val.replace(",", ""));
-        } catch (NumberFormatException e) {
-            return 0.0;
-        }
-    }
-
-    private String safeGet(String[] fields, int index) {
-        return (index >= 0 && index < fields.length) ? fields[index] : "";
+    private Double parseDouble(String[] values, int index) {
+        if (index >= values.length) return 0.0;
+        String str = values[index].replace(",", "").trim();
+        if (str.isEmpty()) return 0.0;
+        try { return Double.parseDouble(str); } catch (Exception e) { return 0.0; }
     }
 
     private String createSubscribeMessage(String stockCode) throws JsonProcessingException {
-        Map<String, Object> header = Map.of(
-                "approval_key", approvalKey,
-                "custtype", "P",
-                "tr_type", "1",
-                "content-type", "utf-8"
-        );
-        Map<String, Object> input = Map.of(
-                "tr_id", trId,
-                "tr_key", stockCode
-        );
-        Map<String, Object> body = Map.of("input", input);
-        Map<String, Object> subscribeData = Map.of("header", header, "body", body);
-
-        return objectMapper.writeValueAsString(subscribeData);
+        Map<String, Object> body = Map.of("input", Map.of("tr_id", trId, "tr_key", stockCode));
+        Map<String, Object> header = Map.of("approval_key", approvalKey, "custtype", "P", "tr_type", "1", "content-type", "utf-8");
+        return objectMapper.writeValueAsString(Map.of("header", header, "body", body));
     }
 }
