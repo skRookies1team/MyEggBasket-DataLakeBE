@@ -8,10 +8,13 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Slice;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -21,57 +24,87 @@ public class RealtimeDataService {
     private final RealtimeDataRepository realtimeDataRepository;
     private final ArchiveService archiveService;
 
+    // 초기값을 현재 시간으로 설정
+    private volatile Instant lastSavedAt = Instant.now();
+
+    // 임계값 50만 개
+    private long batchThreshold = 500000;
+
+    public void setBatchThreshold(long batchThreshold) {
+        this.batchThreshold = batchThreshold;
+    }
+
+    public Instant getLastSavedAt() {
+        return lastSavedAt;
+    }
+
     public RealtimeData save(RealtimeData data) {
-        // [수정됨] 타임스탬프가 비어있으면 현재 KST 시간으로 문자열 포맷팅해서 저장
         if (data.getTimestamp() == null) {
             String nowStr = LocalDateTime.now(ZoneId.of("Asia/Seoul"))
                     .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
             data.setTimestamp(nowStr);
         }
-
         try {
-            return realtimeDataRepository.save(data);
+            RealtimeData saved = realtimeDataRepository.save(data);
+            lastSavedAt = Instant.now();
+            return saved;
         } catch (Exception e) {
-            log.error("Failed to save RealtimeData for {}: {}", data.getStckShrnIscd(), e.getMessage());
+            log.error("Failed to save RealtimeData: {}", e.getMessage());
             return null;
         }
     }
 
-    // 3일치 데이터 정리 로직
-    public void cleanupOldData() {
-        // [수정됨] 비교 기준도 String으로 변환
-        LocalDateTime cutoffDate = LocalDateTime.now(ZoneId.of("Asia/Seoul")).minusDays(3);
-        String cutoffStr = cutoffDate.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
-        String archiveDateStr = cutoffDate.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+    // [최종 수정] 삭제 없이 조회만 하여 CSV로 저장 (중복 저장 주의)
+    public void archiveBatchIfExceedsThreshold() {
+        long currentCount = realtimeDataRepository.count();
 
-        int pageSize = 1000;
-        boolean hasNext = true;
+        if (currentCount >= batchThreshold) {
+            log.info("현재 데이터 {}개. 임계값({}) 도달! CSV 변환 시작 (DB 삭제 안함)", currentCount, batchThreshold);
 
-        log.info("Starting archival and cleanup for data before {}", cutoffStr);
+            long targetToProcess = batchThreshold;
+            long processedCount = 0;
+            int batchSize = 1000;
+            int page = 0; // 삭제하지 않으므로 페이지를 넘겨가며 조회해야 함
 
-        while (hasNext) {
-            // String 타입이어도 날짜 포맷이 일정하면 대소비교(Before) 가능
-            Slice<RealtimeData> slice = realtimeDataRepository.findAllByTimestampBefore(
-                    cutoffStr,
-                    PageRequest.of(0, pageSize)
-            );
+            while (processedCount < targetToProcess) {
+                // page 변수를 사용해 다음 데이터를 계속 가져옴
+                Slice<RealtimeData> slice = realtimeDataRepository.findAllByOrderByTimestampAsc(
+                        PageRequest.of(page, batchSize)
+                );
 
-            List<RealtimeData> contents = slice.getContent();
+                if (!slice.hasContent()) {
+                    break;
+                }
 
-            if (contents.isEmpty()) {
-                break;
+                List<RealtimeData> contents = slice.getContent();
+
+                // 날짜별로 CSV 저장
+                Map<String, List<RealtimeData>> groupedByDate = contents.stream()
+                        .collect(Collectors.groupingBy(d -> {
+                            if (d.getTimestamp() != null && d.getTimestamp().length() >= 10) {
+                                return d.getTimestamp().substring(0, 10);
+                            }
+                            return "unknown_date";
+                        }));
+
+                groupedByDate.forEach((dateStr, list) -> {
+                    try {
+                        archiveService.archiveData(list, dateStr);
+                    } catch (Exception e) {
+                        log.error("Failed to archive data for date: {}", dateStr, e);
+                    }
+                });
+
+                // ★ 중요: deleteAll() 코드가 없으므로 DB 데이터는 안전합니다.
+
+                processedCount += contents.size();
+                page++; // 다음 페이지로 이동
+
+                log.debug("Archived {} records (Page {})...", processedCount, page);
             }
-
-            try {
-                archiveService.archiveData(contents, archiveDateStr);
-                realtimeDataRepository.deleteAll(contents);
-            } catch (Exception e) {
-                log.error("Archiving failed. Stopping cleanup.", e);
-                break;
-            }
-
-            hasNext = slice.hasNext();
+            log.info("CSV 변환 완료. 총 {}개 처리됨. (데이터는 DB에 그대로 남음)", processedCount);
+        } else {
+            log.info("현재 데이터: {}개. 아직 임계값({})에 도달하지 않음.", currentCount, batchThreshold);
         }
-        log.info("Cleanup process finished.");
     }
 }

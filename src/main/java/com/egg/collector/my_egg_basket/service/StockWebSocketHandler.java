@@ -41,6 +41,7 @@ public class StockWebSocketHandler extends TextWebSocketHandler {
         log.info("WebSocket connection established. Subscribing to {} stocks...", stockCodes.length);
         for (String code : stockCodes) {
             session.sendMessage(new TextMessage(createSubscribeMessage(code)));
+            Thread.sleep(100);
         }
     }
 
