@@ -1,6 +1,5 @@
 package com.egg.collector.my_egg_basket.service;
 
-import com.egg.collector.my_egg_basket.domain.RealtimeDataRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
@@ -11,14 +10,12 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.reactive.function.client.WebClientResponseException;
+import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.client.WebSocketClient;
 import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 
-import java.net.URI;
-import java.net.URISyntaxException; // 🚨 URISyntaxException 임포트 추가
-import java.util.HashMap;
-import java.util.Map;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -46,129 +43,113 @@ public class KisWebSocketConnector {
     @Value("${kis.subscription.codes}")
     private String[] stockCodes;
 
+    private final AtomicReference<WebSocketSession> currentSession = new AtomicReference<>(null);
     private final AtomicReference<String> approvalKey = new AtomicReference<>(null);
-    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(); // 🚨 오타 수정: newSingleThreadScheduledService() -> newSingleThreadScheduledExecutor()
-    // H0STCNT0 필드 인덱스 매핑 (useRealtimeStock.ts 참고)
-    public static final Map<String, Integer> FIELD_MAP = new HashMap<>();
-    static {
-        FIELD_MAP.put("stck_shrn_iscd", 0);
-        FIELD_MAP.put("stck_cntg_hour", 1);
-        FIELD_MAP.put("stck_prpr", 2);
-        FIELD_MAP.put("prdy_vrss", 4);
-        FIELD_MAP.put("prdy_ctrt", 5);
-        FIELD_MAP.put("acml_vol", 6);
-        FIELD_MAP.put("askp1", 7);
-        FIELD_MAP.put("bidp1", 8);
-        FIELD_MAP.put("wght_avrg_prc", 10);
-        FIELD_MAP.put("acml_tr_pbmn", 14);
-        FIELD_MAP.put("seln_cntg_csnu", 15);
-        FIELD_MAP.put("shnu_cntg_csnu", 16);
-        FIELD_MAP.put("total_askp_rsqn", 38);
-        FIELD_MAP.put("total_bidp_rsqn", 39);
-    }
-    public static final int IDX_TOTAL_BIDP_RSQN = 39;
+    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
     @PostConstruct
     public void startClient() {
-        scheduler.scheduleAtFixedRate(this::getAndConnect, 0, 24, TimeUnit.HOURS);
-        dataService.cleanupOldData();
-        scheduler.scheduleAtFixedRate(dataService::cleanupOldData, 1, 1, TimeUnit.HOURS);
+        // 1. 초기 실행 및 매일 Approval Key 갱신
+        scheduler.scheduleAtFixedRate(this::refreshKeyAndConnect, 0, 24, TimeUnit.HOURS);
+
+        // 2. [변경] 데이터 아카이빙 체크 (1시간 주기)
+        // 매 시간 실행되지만, 어제 파일이 이미 있으면 Service 내부에서 바로 리턴하므로 부하 없음
+        scheduler.scheduleAtFixedRate(dataService::archiveYesterdayDataIfNeeded, 1, 60, TimeUnit.MINUTES);
+
+        // 3. 헬스체크 (1분 주기)
+        scheduler.scheduleAtFixedRate(this::healthCheck, 1, 1, TimeUnit.MINUTES);
     }
 
-    private void getAndConnect() {
+    private void refreshKeyAndConnect() {
         try {
             String key = getApprovalKey();
-            if (key != null && !key.isEmpty()) {
+            if (key != null) {
                 approvalKey.set(key);
                 connectAndSubscribe();
-            } else {
-                log.error("Failed to get Approval Key. Retrying in 1 hour.");
-                scheduler.schedule(this::getAndConnect, 1, TimeUnit.HOURS);
             }
         } catch (Exception e) {
-            log.error("Error during initial connection setup: {}", e.getMessage(), e);
+            log.error("Failed to refresh key: {}", e.getMessage());
         }
     }
 
-    /**
-     * 1. 한국투자증권 REST API를 호출하여 Approval Key를 발급받습니다.
-     * @return 발급된 Approval Key
-     */
+    private void healthCheck() {
+        WebSocketSession session = currentSession.get();
+        if (session != null && session.isOpen()) {
+            Instant last = dataService.getLastSavedAt();
+            // 마지막 저장 후 2분이 지났으면 '좀비 연결'로 판단하고 재접속
+            // 주의: 장 시작 전이나 거래가 없는 시간대에도 재접속 시도함
+            if (Duration.between(last, Instant.now()).toMinutes() >= 2) {
+                log.warn("No data received for 2 mins (Last saved: {}). Force reconnecting...", last);
+                closeSession(session);
+            }
+        } else {
+            log.info("Session is closed or null. Connecting...");
+            connectAndSubscribe();
+        }
+    }
+
+    private synchronized void connectAndSubscribe() {
+        WebSocketSession existing = currentSession.get();
+        if (existing != null && existing.isOpen()) {
+            return;
+        }
+
+        if (approvalKey.get() == null) {
+            log.warn("Approval Key is missing. Skipping connection.");
+            return;
+        }
+
+        WebSocketClient client = new StandardWebSocketClient();
+        try {
+            log.info("Connecting to WebSocket URL: {}", wsUrl);
+            client.execute(
+                    new StockWebSocketHandler(approvalKey.get(), stockCodes, trId, dataService, objectMapper, this::handleClose),
+                    wsUrl
+            ).thenAccept(session -> {
+                currentSession.set(session);
+                log.info("Session connected: {}", session.getId());
+            });
+
+        } catch (Exception e) {
+            log.error("WebSocket connection failed: {}", e.getMessage());
+            scheduler.schedule(this::connectAndSubscribe, 10, TimeUnit.SECONDS);
+        }
+    }
+
+    private void handleClose(Void ignored) {
+        log.warn("WebSocket connection closed/reset detected.");
+        currentSession.set(null);
+        // 너무 빠른 재접속 방지 (5초 대기)
+        scheduler.schedule(this::connectAndSubscribe, 5, TimeUnit.SECONDS);
+    }
+
+    private void closeSession(WebSocketSession session) {
+        try {
+            if (session != null && session.isOpen()) {
+                session.close();
+            }
+        } catch (Exception e) {
+            log.error("Error closing session: {}", e.getMessage());
+        }
+    }
+
     private String getApprovalKey() {
-        log.info("Requesting Approval Key from KIS API at {}/oauth2/Approval...", apiUrl);
+        log.info("Requesting Approval Key...");
         try {
             WebClient webClient = WebClient.builder()
                     .baseUrl(apiUrl)
                     .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
                     .build();
-
             Map<String, String> requestBody = Map.of(
                     "grant_type", "client_credentials",
                     "appkey", appKey,
                     "secretkey", appSecret
             );
-
-            JsonNode response = webClient.post()
-                    .uri("/oauth2/Approval")
-                    .bodyValue(requestBody)
-                    .retrieve()
-                    .bodyToMono(JsonNode.class)
-                    .block();
-
-            String key = response != null && response.has("approval_key")
-                    ? response.get("approval_key").asText()
-                    : null;
-
-            if (key != null && !key.isEmpty()) {
-                log.info("Approval Key received successfully: {}", key.substring(0, 10) + "...");
-                return key;
-            } else {
-                log.error("Failed to parse approval_key from response or key is empty. Response: {}", response != null ? response.toString() : "null");
-                return null;
-            }
-        } catch (WebClientResponseException e) {
-            log.error("Failed to get Approval Key (HTTP Status: {}): Check your AppKey/AppSecret. Response Body: {}", e.getStatusCode(), e.getResponseBodyAsString());
-            return null;
+            JsonNode response = webClient.post().uri("/oauth2/Approval").bodyValue(requestBody).retrieve().bodyToMono(JsonNode.class).block();
+            return response != null ? response.get("approval_key").asText() : null;
         } catch (Exception e) {
-            log.error("Failed to get Approval Key: {}", e.getMessage(), e);
+            log.error("Key issuance failed: {}", e.getMessage());
             return null;
         }
-    }
-
-    /**
-     * 2. 웹소켓에 연결하고 모든 종목을 구독합니다.
-     */
-    private void connectAndSubscribe() {
-        WebSocketClient client = new StandardWebSocketClient();
-        URI uri = null;
-        try {uri = new URI(wsUrl); // 유효성 검증만 수행
-        } catch (URISyntaxException e) {
-            log.error("Invalid WebSocket URL syntax: {}. Error: {}", wsUrl, e.getMessage());
-            handleClose(null);
-            return;
-        }
-
-        try {
-            client.execute(
-                    new StockWebSocketHandler(approvalKey.get(), stockCodes, trId, dataService, objectMapper, this::handleClose),
-                    wsUrl // execute는 String 시그니처 사용
-            ).get();
-
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            log.error("WebSocket connection interrupted.");
-        } catch (Exception e) {
-            log.error("WebSocket connection failed: {}", e.getMessage());
-            handleClose(null);
-        }
-    }
-
-    /**
-     * 웹소켓 연결 종료 시 재접속을 시도합니다. (Consumer<Void> 시그니처 맞춤)
-     * @param ignored StockWebSocketHandler에서 전달되는 Void 인자 (사용하지 않음)
-     */
-    private void handleClose(Void ignored) {
-        log.warn("WebSocket connection closed. Retrying connection in 5 seconds...");
-        scheduler.schedule(this::connectAndSubscribe, 5, TimeUnit.SECONDS);
     }
 }
