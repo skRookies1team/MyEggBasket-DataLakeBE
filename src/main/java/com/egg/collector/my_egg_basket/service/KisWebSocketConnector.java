@@ -49,11 +49,12 @@ public class KisWebSocketConnector {
 
     @PostConstruct
     public void startClient() {
-        // 1. 초기 실행 및 매일 Approval Key 갱신 (24시간 주기)
+        // 1. 초기 실행 및 매일 Approval Key 갱신
         scheduler.scheduleAtFixedRate(this::refreshKeyAndConnect, 0, 24, TimeUnit.HOURS);
 
-        // 2. [수정] 데이터 정리 (10분 주기) - 50만 개 체크를 더 자주 수행
-        scheduler.scheduleAtFixedRate(dataService::archiveBatchIfExceedsThreshold, 1, 10, TimeUnit.MINUTES);
+        // 2. [변경] 데이터 아카이빙 체크 (1시간 주기)
+        // 매 시간 실행되지만, 어제 파일이 이미 있으면 Service 내부에서 바로 리턴하므로 부하 없음
+        scheduler.scheduleAtFixedRate(dataService::archiveYesterdayDataIfNeeded, 1, 60, TimeUnit.MINUTES);
 
         // 3. 헬스체크 (1분 주기)
         scheduler.scheduleAtFixedRate(this::healthCheck, 1, 1, TimeUnit.MINUTES);

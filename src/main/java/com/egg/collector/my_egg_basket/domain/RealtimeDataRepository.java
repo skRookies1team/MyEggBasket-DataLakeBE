@@ -10,4 +10,6 @@ public interface RealtimeDataRepository extends MongoRepository<RealtimeData, St
 
     // 오래된 순서대로 데이터를 조회하기 위한 메소드 추가
     Slice<RealtimeData> findAllByOrderByTimestampAsc(Pageable pageable);
+
+    Slice<RealtimeData> findAllByTimestampBetweenOrderByTimestampAsc(String start, String end, Pageable pageable);
 }

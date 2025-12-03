@@ -9,12 +9,10 @@ import org.springframework.data.domain.Slice;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
-import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -24,15 +22,7 @@ public class RealtimeDataService {
     private final RealtimeDataRepository realtimeDataRepository;
     private final ArchiveService archiveService;
 
-    // 초기값을 현재 시간으로 설정
     private volatile Instant lastSavedAt = Instant.now();
-
-    // 임계값 50만 개
-    private long batchThreshold = 500000;
-
-    public void setBatchThreshold(long batchThreshold) {
-        this.batchThreshold = batchThreshold;
-    }
 
     public Instant getLastSavedAt() {
         return lastSavedAt;
@@ -54,57 +44,60 @@ public class RealtimeDataService {
         }
     }
 
-    // [최종 수정] 삭제 없이 조회만 하여 CSV로 저장 (중복 저장 주의)
-    public void archiveBatchIfExceedsThreshold() {
-        long currentCount = realtimeDataRepository.count();
+    // [변경] 어제 날짜의 CSV가 없으면 생성 (50만개 제한 로직 제거)
+    public void archiveYesterdayDataIfNeeded() {
+        // 한국 시간 기준 '어제' 날짜 계산
+        LocalDate yesterday = LocalDate.now(ZoneId.of("Asia/Seoul")).minusDays(1);
+        String dateStr = yesterday.toString(); // "2025-11-26" 형태
 
-        if (currentCount >= batchThreshold) {
-            log.info("현재 데이터 {}개. 임계값({}) 도달! CSV 변환 시작 (DB 삭제 안함)", currentCount, batchThreshold);
-
-            long targetToProcess = batchThreshold;
-            long processedCount = 0;
-            int batchSize = 1000;
-            int page = 0; // 삭제하지 않으므로 페이지를 넘겨가며 조회해야 함
-
-            while (processedCount < targetToProcess) {
-                // page 변수를 사용해 다음 데이터를 계속 가져옴
-                Slice<RealtimeData> slice = realtimeDataRepository.findAllByOrderByTimestampAsc(
-                        PageRequest.of(page, batchSize)
-                );
-
-                if (!slice.hasContent()) {
-                    break;
-                }
-
-                List<RealtimeData> contents = slice.getContent();
-
-                // 날짜별로 CSV 저장
-                Map<String, List<RealtimeData>> groupedByDate = contents.stream()
-                        .collect(Collectors.groupingBy(d -> {
-                            if (d.getTimestamp() != null && d.getTimestamp().length() >= 10) {
-                                return d.getTimestamp().substring(0, 10);
-                            }
-                            return "unknown_date";
-                        }));
-
-                groupedByDate.forEach((dateStr, list) -> {
-                    try {
-                        archiveService.archiveData(list, dateStr);
-                    } catch (Exception e) {
-                        log.error("Failed to archive data for date: {}", dateStr, e);
-                    }
-                });
-
-                // ★ 중요: deleteAll() 코드가 없으므로 DB 데이터는 안전합니다.
-
-                processedCount += contents.size();
-                page++; // 다음 페이지로 이동
-
-                log.debug("Archived {} records (Page {})...", processedCount, page);
-            }
-            log.info("CSV 변환 완료. 총 {}개 처리됨. (데이터는 DB에 그대로 남음)", processedCount);
-        } else {
-            log.info("현재 데이터: {}개. 아직 임계값({})에 도달하지 않음.", currentCount, batchThreshold);
+        // 1. 이미 파일이 존재하는지 확인
+        if (archiveService.isArchived(dateStr)) {
+            // 이미 처리되었으므로 스킵 (로그는 디버그 레벨로 줄여서 도배 방지)
+            log.debug("Already archived for date: {}", dateStr);
+            return;
         }
+
+        log.info("Archiving data for date: {} (File not found)", dateStr);
+
+        String startTimestamp = dateStr + " 00:00:00";
+        String endTimestamp = dateStr + " 23:59:59";
+
+        int page = 0;
+        int batchSize = 1000; // 메모리 보호를 위해 읽을 때는 끊어서 읽음
+        long totalProcessed = 0;
+
+        while (true) {
+            // 2. 어제 날짜 데이터 조회 (DB 삭제 안함)
+            Slice<RealtimeData> slice = realtimeDataRepository.findAllByTimestampBetweenOrderByTimestampAsc(
+                    startTimestamp, endTimestamp, PageRequest.of(page, batchSize)
+            );
+
+            if (!slice.hasContent()) {
+                if (totalProcessed == 0) {
+                    log.info("No data found for date: {}", dateStr);
+                }
+                break;
+            }
+
+            // 3. 파일에 이어 쓰기 (append)
+            archiveService.archiveData(slice.getContent(), dateStr);
+            totalProcessed += slice.getContent().size();
+
+            if (!slice.hasNext()) {
+                break;
+            }
+            page++;
+        }
+
+        if (totalProcessed > 0) {
+            log.info("Completed archiving for {}: Total {} records.", dateStr, totalProcessed);
+        }
+    }
+
+    // 이전 메소드 호환성을 위해 남겨두거나 삭제 가능
+    public void setBatchThreshold(long threshold) {}
+    public void archiveBatchIfExceedsThreshold() {
+        // 더 이상 사용하지 않음 -> archiveYesterdayDataIfNeeded 호출로 대체 권장
+        archiveYesterdayDataIfNeeded();
     }
 }
