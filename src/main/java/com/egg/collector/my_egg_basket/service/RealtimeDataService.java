@@ -44,42 +44,54 @@ public class RealtimeDataService {
         }
     }
 
-    // [변경] 어제 날짜의 CSV가 없으면 생성 (50만개 제한 로직 제거)
-    public void archiveYesterdayDataIfNeeded() {
-        // 한국 시간 기준 '어제' 날짜 계산
-        LocalDate yesterday = LocalDate.now(ZoneId.of("Asia/Seoul")).minusDays(1);
-        String dateStr = yesterday.toString(); // "2025-11-26" 형태
+    /**
+     * [변경] 최근 3일간의 데이터를 확인하여 아카이빙
+     * (예: 월요일 실행 시 -> 일, 토, 금 순서로 확인하여 금요일 데이터 누락 방지)
+     */
+    public void archivePastDataIfNeeded() {
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
 
-        // 1. 이미 파일이 존재하는지 확인
-        if (archiveService.isArchived(dateStr)) {
-            // 이미 처리되었으므로 스킵 (로그는 디버그 레벨로 줄여서 도배 방지)
-            log.debug("Already archived for date: {}", dateStr);
-            return;
+        // 1일 전부터 3일 전까지 순회
+        for (int i = 1; i <= 3; i++) {
+            LocalDate targetDate = today.minusDays(i);
+            String dateStr = targetDate.toString(); // "2025-12-05"
+
+            // 1. 이미 파일이 존재하는지 확인
+            if (archiveService.isArchived(dateStr)) {
+                log.debug("Already archived for date: {}", dateStr);
+                continue; // 이미 있으면 다음 날짜 확인
+            }
+
+            // 2. 해당 날짜 아카이빙 수행
+            processArchiving(dateStr);
         }
+    }
 
-        log.info("Archiving data for date: {} (File not found)", dateStr);
+    // 아카이빙 실제 로직 분리
+    private void processArchiving(String dateStr) {
+        log.info("Checking & Archiving data for date: {}", dateStr);
 
         String startTimestamp = dateStr + " 00:00:00";
         String endTimestamp = dateStr + " 23:59:59";
 
         int page = 0;
-        int batchSize = 1000; // 메모리 보호를 위해 읽을 때는 끊어서 읽음
+        int batchSize = 1000;
         long totalProcessed = 0;
 
         while (true) {
-            // 2. 어제 날짜 데이터 조회 (DB 삭제 안함)
+            // DB 조회
             Slice<RealtimeData> slice = realtimeDataRepository.findAllByTimestampBetweenOrderByTimestampAsc(
                     startTimestamp, endTimestamp, PageRequest.of(page, batchSize)
             );
 
             if (!slice.hasContent()) {
                 if (totalProcessed == 0) {
-                    log.info("No data found for date: {}", dateStr);
+                    log.info("No data found for date: {} (Skipping creation)", dateStr);
                 }
                 break;
             }
 
-            // 3. 파일에 이어 쓰기 (append)
+            // 파일 저장
             archiveService.archiveData(slice.getContent(), dateStr);
             totalProcessed += slice.getContent().size();
 
@@ -94,10 +106,9 @@ public class RealtimeDataService {
         }
     }
 
-    // 이전 메소드 호환성을 위해 남겨두거나 삭제 가능
+    // 이전 호환성 유지 (필요 없다면 삭제 가능)
     public void setBatchThreshold(long threshold) {}
     public void archiveBatchIfExceedsThreshold() {
-        // 더 이상 사용하지 않음 -> archiveYesterdayDataIfNeeded 호출로 대체 권장
-        archiveYesterdayDataIfNeeded();
+        archivePastDataIfNeeded();
     }
 }
