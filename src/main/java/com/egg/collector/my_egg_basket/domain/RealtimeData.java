@@ -17,8 +17,6 @@ public class RealtimeData {
     @Id
     private String id;
 
-    // [수정됨] LocalDateTime -> String
-    // DB에 "2025-11-26 09:45:09" 문자열 그대로 저장됨
     private String timestamp;
 
     private String stckShrnIscd;

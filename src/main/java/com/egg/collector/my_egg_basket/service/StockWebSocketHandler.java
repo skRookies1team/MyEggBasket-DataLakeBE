@@ -9,6 +9,7 @@ import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
+import java.io.IOException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -40,8 +41,19 @@ public class StockWebSocketHandler extends TextWebSocketHandler {
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
         log.info("WebSocket connection established. Subscribing to {} stocks...", stockCodes.length);
         for (String code : stockCodes) {
-            session.sendMessage(new TextMessage(createSubscribeMessage(code)));
-            Thread.sleep(100);
+            // 세션이 열려있는지 확인
+            if (!session.isOpen()) {
+                log.warn("Session closed, stopping subscription.");
+                break;
+            }
+
+            try {
+                session.sendMessage(new TextMessage(createSubscribeMessage(code)));
+                Thread.sleep(300);
+            } catch (IOException e) {
+                log.error("Error sending subscription for {}: {}", code, e.getMessage());
+                break; // 에러 발생 시 루프 중단
+            }
         }
     }
 
@@ -120,6 +132,7 @@ public class StockWebSocketHandler extends TextWebSocketHandler {
     }
 
     private String createSubscribeMessage(String stockCode) throws JsonProcessingException {
+        String cleanCode = stockCode.trim();
         Map<String, Object> body = Map.of("input", Map.of("tr_id", trId, "tr_key", stockCode));
         Map<String, Object> header = Map.of("approval_key", approvalKey, "custtype", "P", "tr_type", "1", "content-type", "utf-8");
         return objectMapper.writeValueAsString(Map.of("header", header, "body", body));
