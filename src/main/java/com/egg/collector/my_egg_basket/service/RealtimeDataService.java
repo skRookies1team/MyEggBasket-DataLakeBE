@@ -21,6 +21,7 @@ public class RealtimeDataService {
 
     private final RealtimeDataRepository realtimeDataRepository;
     private final ArchiveService archiveService;
+    private final KafkaProducerService kafkaProducerService;
 
     private volatile Instant lastSavedAt = Instant.now();
 
@@ -35,8 +36,11 @@ public class RealtimeDataService {
             data.setTimestamp(nowStr);
         }
         try {
+            // MongoDB 저장
             RealtimeData saved = realtimeDataRepository.save(data);
             lastSavedAt = Instant.now();
+            // Kafka 전송
+            kafkaProducerService.sendRealtimeData(saved);
             return saved;
         } catch (Exception e) {
             log.error("Failed to save RealtimeData: {}", e.getMessage());
