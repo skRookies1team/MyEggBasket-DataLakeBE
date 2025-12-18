@@ -24,7 +24,7 @@ public class KafkaProducerService {
                         if (ex != null) {
                             log.error("Kafka 전송 실패: {}", ex.getMessage());
                         } else {
-                            log.debug("Kafka 전송 성공: {} offset {}",
+                            log.info("Kafka 전송 성공: {} offset {}",
                                     data.getStckShrnIscd(),
                                     result.getRecordMetadata().offset());
                         }
