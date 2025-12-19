@@ -37,9 +37,9 @@ public class RealtimeDataService {
         try {
             // Kafka로 전송만 수행
             kafkaProducerService.sendRealtimeData(data);
-            log.debug("📤 Kafka 전송 완료: {}", data.getStckShrnIscd());
+            log.debug("Kafka 전송 완료: {}", data.getStckShrnIscd());
         } catch (Exception e) {
-            log.error("❌ Kafka 전송 실패: {}", e.getMessage(), e);
+            log.error("Kafka 전송 실패: {}", e.getMessage(), e);
         }
     }
 

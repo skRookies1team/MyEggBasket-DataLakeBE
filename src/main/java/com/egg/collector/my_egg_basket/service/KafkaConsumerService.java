@@ -24,17 +24,17 @@ public class KafkaConsumerService {
     )
     public void consumeRealtimeData(RealtimeData data) {
         try {
-            log.debug("📥 Kafka 메시지 수신: {} at {}",
+            log.debug("Kafka 메시지 수신: {} at {}",
                     data.getStckShrnIscd(), data.getTimestamp());
 
             // MongoDB에 저장
             RealtimeData saved = realtimeDataRepository.save(data);
             lastSavedAt = Instant.now();
 
-            log.debug("💾 MongoDB 저장 완료: ID={}", saved.getId());
+            log.debug("MongoDB 저장 완료: ID={}", saved.getId());
 
         } catch (Exception e) {
-            log.error("❌ MongoDB 저장 실패: {}", e.getMessage(), e);
+            log.error("MongoDB 저장 실패: {}", e.getMessage(), e);
         }
     }
 
