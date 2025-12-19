@@ -8,6 +8,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Slice;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -22,24 +23,38 @@ public class RealtimeDataService {
     private final ArchiveService archiveService;
     private final KafkaProducerService kafkaProducerService;
 
+    private volatile Instant lastSavedAt = Instant.now();
+
+    public Instant getLastSavedAt() {
+        return lastSavedAt;
+    }
+
     /**
-     * [변경됨] WebSocket에서 받은 데이터를 바로 Kafka로만 전송
-     * MongoDB 저장은 KafkaConsumerService에서 처리
+     * Kafka로 데이터 전송 (DB 저장 안 함)
+     * 웹소켓 핸들러에서 호출
      */
     public void sendToKafka(RealtimeData data) {
-        // 타임스탬프가 없으면 현재 시각 추가
         if (data.getTimestamp() == null) {
             String nowStr = LocalDateTime.now(ZoneId.of("Asia/Seoul"))
                     .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
             data.setTimestamp(nowStr);
         }
+        kafkaProducerService.sendRealtimeData(data);
+    }
 
+    /**
+     * MongoDB에 데이터 저장 (Kafka 전송 안 함)
+     * Kafka Consumer에서 호출
+     */
+    public RealtimeData save(RealtimeData data) {
         try {
-            // Kafka로 전송만 수행
-            kafkaProducerService.sendRealtimeData(data);
-            log.debug("Kafka 전송 완료: {}", data.getStckShrnIscd());
+            // MongoDB 저장만 수행
+            RealtimeData saved = realtimeDataRepository.save(data);
+            lastSavedAt = Instant.now();
+            return saved;
         } catch (Exception e) {
-            log.error("Kafka 전송 실패: {}", e.getMessage(), e);
+            log.error("Failed to save RealtimeData: {}", e.getMessage());
+            throw e; // Consumer가 재시도할 수 있도록 예외 던짐
         }
     }
 
@@ -49,6 +64,7 @@ public class RealtimeDataService {
     public void archivePastDataIfNeeded() {
         LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
 
+        // 1일 전부터 3일 전까지 순회
         for (int i = 1; i <= 3; i++) {
             LocalDate targetDate = today.minusDays(i);
             String dateStr = targetDate.toString();
@@ -96,5 +112,10 @@ public class RealtimeDataService {
         if (totalProcessed > 0) {
             log.info("Completed archiving for {}: Total {} records.", dateStr, totalProcessed);
         }
+    }
+
+    public void setBatchThreshold(long threshold) {}
+    public void archiveBatchIfExceedsThreshold() {
+        archivePastDataIfNeeded();
     }
 }

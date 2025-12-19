@@ -9,6 +9,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
+import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.support.serializer.JsonDeserializer;
 
 import java.util.HashMap;
@@ -28,7 +29,7 @@ public class KafkaConsumerConfig {
         config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
 
         // Consumer Group ID
-        config.put(ConsumerConfig.GROUP_ID_CONFIG, "mongo-consumer-group");
+        config.put(ConsumerConfig.GROUP_ID_CONFIG, "mongo-consumer-group-v1");
 
         // Key Deserializer (String)
         config.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
@@ -36,12 +37,11 @@ public class KafkaConsumerConfig {
         // Value Deserializer (JSON → RealtimeData)
         config.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class);
 
-        // 자동 오프셋 커밋
-        config.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, true);
-        config.put(ConsumerConfig.AUTO_COMMIT_INTERVAL_MS_CONFIG, 1000);
+        // 자동 오프셋 커밋 비활성화 (수동 커밋으로 변경)
+        config.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
 
-        // 오프셋이 없을 때 최신부터 읽기
-        config.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
+        // 오프셋이 없을 때 처음부터 읽기 (기존 메시지 모두 처리)
+        config.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
 
         // JSON Deserializer 설정
         JsonDeserializer<RealtimeData> deserializer = new JsonDeserializer<>(RealtimeData.class);
@@ -63,7 +63,14 @@ public class KafkaConsumerConfig {
         factory.setConsumerFactory(consumerFactory());
 
         // 동시 처리 스레드 개수
-        factory.setConcurrency(3);
+        // 주의: 종목별(key별) 순서 보장을 위해 1로 설정
+        // (같은 key의 메시지는 같은 파티션으로 가므로 순서 보장됨)
+        factory.setConcurrency(1);
+
+        // [수정] 컨테이너 속성에 수동 커밋 모드 설정
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL);
+
+        // [제거] 데이터 중복을 유발할 수 있는 RebalanceListener 제거
 
         return factory;
     }

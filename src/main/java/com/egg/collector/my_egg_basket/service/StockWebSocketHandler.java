@@ -41,7 +41,6 @@ public class StockWebSocketHandler extends TextWebSocketHandler {
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
         log.info("WebSocket connection established. Subscribing to {} stocks...", stockCodes.length);
         for (String code : stockCodes) {
-            // 세션이 열려있는지 확인
             if (!session.isOpen()) {
                 log.warn("Session closed, stopping subscription.");
                 break;
@@ -52,7 +51,7 @@ public class StockWebSocketHandler extends TextWebSocketHandler {
                 Thread.sleep(300);
             } catch (IOException e) {
                 log.error("Error sending subscription for {}: {}", code, e.getMessage());
-                break; // 에러 발생 시 루프 중단
+                break;
             }
         }
     }
@@ -99,7 +98,7 @@ public class StockWebSocketHandler extends TextWebSocketHandler {
 
                 data.setNegative(data.getPrdyCtrt() < 0);
 
-                // Kafka 전송만
+                // [수정] 데이터를 Kafka로만 전송
                 dataService.sendToKafka(data);
 
             } catch (Exception e) {

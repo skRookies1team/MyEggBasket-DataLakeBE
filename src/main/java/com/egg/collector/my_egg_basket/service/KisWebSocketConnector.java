@@ -28,7 +28,6 @@ import java.util.concurrent.atomic.AtomicReference;
 public class KisWebSocketConnector {
 
     private final RealtimeDataService dataService;
-    private final KafkaConsumerService kafkaConsumerService;
     private final ObjectMapper objectMapper;
 
     @Value("${kis.api.url}")
@@ -75,8 +74,8 @@ public class KisWebSocketConnector {
     private void healthCheck() {
         WebSocketSession session = currentSession.get();
         if (session != null && session.isOpen()) {
-            // KafkaConsumerService에서 마지막 저장 시각 확인
-            Instant last = kafkaConsumerService.getLastSavedAt();
+            // [수정] RealtimeDataService에서 마지막 저장 시각 확인
+            Instant last = dataService.getLastSavedAt();
             // 마지막 저장 후 2분이 지났으면 '좀비 연결'로 판단하고 재접속
             if (Duration.between(last, Instant.now()).toMinutes() >= 2) {
                 log.warn("No data received for 2 mins (Last saved: {}). Force reconnecting...", last);
