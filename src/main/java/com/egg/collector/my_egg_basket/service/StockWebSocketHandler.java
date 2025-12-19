@@ -70,20 +70,16 @@ public class StockWebSocketHandler extends TextWebSocketHandler {
                 String stockCode = values[0];
                 String timeStr = values[1];
 
-                // 1. 한국 시간 생성
                 LocalDate kstDate = LocalDate.now(ZoneId.of("Asia/Seoul"));
                 LocalTime kstTime = LocalTime.parse(timeStr, DateTimeFormatter.ofPattern("HHmmss"));
                 LocalDateTime finalTimestamp = LocalDateTime.of(kstDate, kstTime);
-
-                // 2. [수정됨] 포맷팅하여 문자열로 변환 (yyyy-MM-dd HH:mm:ss)
                 String timestampStr = finalTimestamp.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
 
                 RealtimeData data = new RealtimeData();
-                data.setTimestamp(timestampStr); // 문자열 저장
+                data.setTimestamp(timestampStr);
                 data.setStckShrnIscd(stockCode);
                 data.setStckCntgHour(timeStr);
 
-                // 숫자 파싱 (소수점 처리 포함)
                 data.setStckPrpr(parseDoubleAsLong(values, 2));
                 data.setPrdyVrss(parseDoubleAsLong(values, 4));
                 data.setPrdyCtrt(parseDouble(values, 5));
@@ -103,7 +99,8 @@ public class StockWebSocketHandler extends TextWebSocketHandler {
 
                 data.setNegative(data.getPrdyCtrt() < 0);
 
-                dataService.save(data);
+                // [변경됨] MongoDB 저장 제거, Kafka 전송만
+                dataService.sendToKafka(data);  // 이 부분만 변경!
 
             } catch (Exception e) {
                 log.error("Parsing error: {}", e.getMessage());
