@@ -99,8 +99,8 @@ public class StockWebSocketHandler extends TextWebSocketHandler {
 
                 data.setNegative(data.getPrdyCtrt() < 0);
 
-                // [변경됨] MongoDB 저장 제거, Kafka 전송만
-                dataService.sendToKafka(data);  // 이 부분만 변경!
+                // Kafka 전송만
+                dataService.sendToKafka(data);
 
             } catch (Exception e) {
                 log.error("Parsing error: {}", e.getMessage());
