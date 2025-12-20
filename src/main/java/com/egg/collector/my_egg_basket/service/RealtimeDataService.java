@@ -48,13 +48,20 @@ public class RealtimeDataService {
      */
     public RealtimeData save(RealtimeData data) {
         try {
-            // MongoDB 저장만 수행
+            log.debug("MongoDB 저장 시도: {}", data.getStckShrnIscd());
+            
+            // MongoDB 저장
             RealtimeData saved = realtimeDataRepository.save(data);
             lastSavedAt = Instant.now();
+            
+            log.debug("MongoDB 저장 성공: {} (ID: {})", 
+                    saved.getStckShrnIscd(), saved.getId());
+            
             return saved;
         } catch (Exception e) {
-            log.error("Failed to save RealtimeData: {}", e.getMessage());
-            throw e; // Consumer가 재시도할 수 있도록 예외 던짐
+            log.error("MongoDB 저장 실패: {} - {}", 
+                    data.getStckShrnIscd(), e.getMessage(), e);
+            throw e;  // 예외를 다시 던져서 Consumer가 재시도할 수 있게
         }
     }
 
@@ -107,7 +114,7 @@ public class RealtimeDataService {
                 break;
             }
             page++;
-        }
+        }4
 
         if (totalProcessed > 0) {
             log.info("Completed archiving for {}: Total {} records.", dateStr, totalProcessed);
