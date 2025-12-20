@@ -20,24 +20,24 @@ public class RealtimeData {
     private String timestamp;
 
     private String stckShrnIscd;
-    private String stckCntgHour;
+    private String stckCntgHour; // 주식 체결 시간
 
-    private Long stckPrpr;
-    private Long prdyVrss;
-    private Double prdyCtrt;
+    private Long stckPrpr; // 주식 현재가
+    private Long prdyVrss; // 전일 대비
+    private Double prdyCtrt; // 전일 대비율
 
-    private Long acmlVol;
-    private Long acmlTrPbmn;
+    private Long acmlVol; // 누적 거래량
+    private Long acmlTrPbmn; // 누적 거래 대금
 
-    private Long askp1;
-    private Long bidp1;
+    private Long askp1; // 매도호가1
+    private Long bidp1; // 매수호가1
 
-    private Long wghtAvrgPrc;
-    private Long selnCntgCsnu;
-    private Long shnuCntgCsnu;
+    private Long wghtAvrgPrc; //
+    private Long selnCntgCsnu; // 매도 체결 건수
+    private Long shnuCntgCsnu; // 매수 체결 건수
 
-    private Long totalAskpRsqn;
-    private Long totalBidpRsqn;
+    private Long totalAskpRsqn; // 총 매도호가 잔량
+    private Long totalBidpRsqn; // 총 매수호가 잔량
 
     private boolean isNegative;
 }
