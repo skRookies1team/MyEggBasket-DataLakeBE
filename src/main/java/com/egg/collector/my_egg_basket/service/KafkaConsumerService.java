@@ -19,7 +19,7 @@ public class KafkaConsumerService {
 
     @KafkaListener(
             topics = "${kafka.topic.realtime-stock}",
-            groupId = "mongo-consumer-group",
+            groupId = "datalake-group",
             containerFactory = "kafkaListenerContainerFactory"
     )
     public void consumeRealtimeData(RealtimeData data) {

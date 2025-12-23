@@ -28,7 +28,7 @@ public class KafkaConsumerConfig {
         config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
 
         // Consumer Group ID
-        config.put(ConsumerConfig.GROUP_ID_CONFIG, "mongo-consumer-group");
+        config.put(ConsumerConfig.GROUP_ID_CONFIG, "datalake-group");
 
         // Key Deserializer (String)
         config.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);

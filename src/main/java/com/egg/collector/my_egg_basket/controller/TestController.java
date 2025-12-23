@@ -1,7 +1,6 @@
 package com.egg.collector.my_egg_basket.controller;
 
 import com.egg.collector.my_egg_basket.domain.RealtimeData;
-import com.egg.collector.my_egg_basket.service.KafkaProducerService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -10,7 +9,6 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class TestController {
 
-    private final KafkaProducerService kafkaProducerService;
 
     @GetMapping("/test/kafka")
     public String testKafka() {
@@ -21,8 +19,6 @@ public class TestController {
         testData.setPrdyVrss(1000L);
         testData.setPrdyCtrt(1.35);
         testData.setAcmlVol(1000000L);
-
-        kafkaProducerService.sendRealtimeData(testData);
 
         return "Kafka test data sent!";
     }
