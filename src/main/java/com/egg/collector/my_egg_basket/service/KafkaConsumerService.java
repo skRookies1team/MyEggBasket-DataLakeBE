@@ -22,8 +22,7 @@ public class KafkaConsumerService {
     @RetryableTopic(
             attempts = "3",
             backoff = @Backoff(delay = 1000, multiplier = 2.0),
-            include = {Exception.class},  // 모든 예외 재시도
-            exclude = {NullPointerException.class}  // 재시도 불필요한 예외만 제외
+            exclude = {NullPointerException.class}
     )
     @KafkaListener(
             topics = "${kafka.topic.realtime-stock}",
@@ -52,7 +51,7 @@ public class KafkaConsumerService {
         } catch (Exception e) {
             log.error("처리 실패 (재시도 예정): {} - {}",
                     data.getStckShrnIscd(), e.getMessage(), e);
-            throw e;  // 재시도를 위해 예외 던지기
+            throw e;
         }
     }
 
@@ -61,6 +60,5 @@ public class KafkaConsumerService {
                           @Header(KafkaHeaders.EXCEPTION_MESSAGE) String exceptionMessage) {
         log.error("DLT 처리 (최종 실패): {} - 예외: {}",
                 data.getStckShrnIscd(), exceptionMessage);
-        // TODO: 별도 저장 로직
     }
 }

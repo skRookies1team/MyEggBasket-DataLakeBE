@@ -32,9 +32,9 @@ public class KafkaConsumerConfig {
         config.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
         config.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
 
-        // ✅ 피드백 반영: JSON Deserializer를 명시적으로 설정
+        // JSON Deserializer 설정
         JsonDeserializer<RealtimeData> deserializer = new JsonDeserializer<>(RealtimeData.class);
-        deserializer.addTrustedPackages("*"); // 보안상 필요
+        deserializer.addTrustedPackages("*");
         deserializer.setRemoveTypeHeaders(false);
         deserializer.setUseTypeMapperForKey(false);
 

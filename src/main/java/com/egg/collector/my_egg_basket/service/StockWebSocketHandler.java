@@ -129,7 +129,7 @@ public class StockWebSocketHandler extends TextWebSocketHandler {
 
     private String createSubscribeMessage(String stockCode) throws JsonProcessingException {
         String cleanCode = stockCode.trim();
-        Map<String, Object> body = Map.of("input", Map.of("tr_id", trId, "tr_key", stockCode));
+        Map<String, Object> body = Map.of("input", Map.of("tr_id", trId, "tr_key", cleanCode));
         Map<String, Object> header = Map.of("approval_key", approvalKey, "custtype", "P", "tr_type", "1", "content-type", "utf-8");
         return objectMapper.writeValueAsString(Map.of("header", header, "body", body));
     }

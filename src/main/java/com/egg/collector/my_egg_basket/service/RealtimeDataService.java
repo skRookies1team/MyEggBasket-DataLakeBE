@@ -61,7 +61,7 @@ public class RealtimeDataService {
         } catch (Exception e) {
             log.error("MongoDB 저장 실패: {} - {}", 
                     data.getStckShrnIscd(), e.getMessage(), e);
-            throw e;  // 예외를 다시 던져서 Consumer가 재시도할 수 있게
+            throw e;
         }
     }
 
@@ -114,7 +114,7 @@ public class RealtimeDataService {
                 break;
             }
             page++;
-        }4
+        }
 
         if (totalProcessed > 0) {
             log.info("Completed archiving for {}: Total {} records.", dateStr, totalProcessed);
