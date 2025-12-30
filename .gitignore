@@ -35,3 +35,4 @@ application.properties
 ### docker ###
 Dockerfile
 /k8s/*
+docker-compose.yml
