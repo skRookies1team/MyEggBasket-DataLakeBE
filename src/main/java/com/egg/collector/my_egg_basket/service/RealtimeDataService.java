@@ -8,7 +8,6 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Slice;
 import org.springframework.stereotype.Service;
 
-import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -21,53 +20,48 @@ public class RealtimeDataService {
 
     private final RealtimeDataRepository realtimeDataRepository;
     private final ArchiveService archiveService;
+    private final KafkaProducerService kafkaProducerService;
 
-    private volatile Instant lastSavedAt = Instant.now();
-
-    public Instant getLastSavedAt() {
-        return lastSavedAt;
-    }
-
-    public RealtimeData save(RealtimeData data) {
+    /**
+     * [변경됨] WebSocket에서 받은 데이터를 바로 Kafka로만 전송
+     * MongoDB 저장은 KafkaConsumerService에서 처리
+     */
+    public void sendToKafka(RealtimeData data) {
+        // 타임스탬프가 없으면 현재 시각 추가
         if (data.getTimestamp() == null) {
             String nowStr = LocalDateTime.now(ZoneId.of("Asia/Seoul"))
                     .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
             data.setTimestamp(nowStr);
         }
+
         try {
-            RealtimeData saved = realtimeDataRepository.save(data);
-            lastSavedAt = Instant.now();
-            return saved;
+            // Kafka로 전송만 수행
+            kafkaProducerService.sendRealtimeData(data);
+            log.debug("Kafka 전송 완료: {}", data.getStckShrnIscd());
         } catch (Exception e) {
-            log.error("Failed to save RealtimeData: {}", e.getMessage());
-            return null;
+            log.error("Kafka 전송 실패: {}", e.getMessage(), e);
         }
     }
 
     /**
      * [변경] 최근 3일간의 데이터를 확인하여 아카이빙
-     * (예: 월요일 실행 시 -> 일, 토, 금 순서로 확인하여 금요일 데이터 누락 방지)
      */
     public void archivePastDataIfNeeded() {
         LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
 
-        // 1일 전부터 3일 전까지 순회
         for (int i = 1; i <= 3; i++) {
             LocalDate targetDate = today.minusDays(i);
-            String dateStr = targetDate.toString(); // "2025-12-05"
+            String dateStr = targetDate.toString();
 
-            // 1. 이미 파일이 존재하는지 확인
             if (archiveService.isArchived(dateStr)) {
                 log.debug("Already archived for date: {}", dateStr);
-                continue; // 이미 있으면 다음 날짜 확인
+                continue;
             }
 
-            // 2. 해당 날짜 아카이빙 수행
             processArchiving(dateStr);
         }
     }
 
-    // 아카이빙 실제 로직 분리
     private void processArchiving(String dateStr) {
         log.info("Checking & Archiving data for date: {}", dateStr);
 
@@ -79,7 +73,6 @@ public class RealtimeDataService {
         long totalProcessed = 0;
 
         while (true) {
-            // DB 조회
             Slice<RealtimeData> slice = realtimeDataRepository.findAllByTimestampBetweenOrderByTimestampAsc(
                     startTimestamp, endTimestamp, PageRequest.of(page, batchSize)
             );
@@ -91,7 +84,6 @@ public class RealtimeDataService {
                 break;
             }
 
-            // 파일 저장
             archiveService.archiveData(slice.getContent(), dateStr);
             totalProcessed += slice.getContent().size();
 
@@ -104,11 +96,5 @@ public class RealtimeDataService {
         if (totalProcessed > 0) {
             log.info("Completed archiving for {}: Total {} records.", dateStr, totalProcessed);
         }
-    }
-
-    // 이전 호환성 유지 (필요 없다면 삭제 가능)
-    public void setBatchThreshold(long threshold) {}
-    public void archiveBatchIfExceedsThreshold() {
-        archivePastDataIfNeeded();
     }
 }
